@@ -1,0 +1,11 @@
+#tomcat端口
+server:
+  port: 8888
+#Rabbitmq的配置
+spring:
+  rabbitmq:
+    host: 172.16.58.143
+    port: 5672
+    virtual-host: /
+    username: admin
+    password: admin
