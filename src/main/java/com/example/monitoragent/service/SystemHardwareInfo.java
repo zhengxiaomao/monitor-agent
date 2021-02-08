@@ -2,6 +2,7 @@ package com.example.monitoragent.service;
 
 //import cn.hutool.core.util.NumberUtil;
 import com.example.monitoragent.config.RabbitMQConfig;
+import com.example.monitoragent.tools.IpTool;
 import lombok.Data;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,9 +10,13 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import oshi.SystemInfo;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.*;
 import oshi.hardware.*;
 import oshi.hardware.CentralProcessor.TickType;
+import oshi.software.os.FileSystem;
 import oshi.software.os.OSFileStore;
 import oshi.software.os.OperatingSystem;
 import oshi.util.Util;
@@ -43,6 +48,7 @@ public class SystemHardwareInfo implements Serializable {
 
 
 
+
     @Scheduled(cron="*/5 * * * * ?")
     public void copyTo() throws Exception {
 
@@ -50,10 +56,11 @@ public class SystemHardwareInfo implements Serializable {
         System.out.println("收集信息...");
         SystemInfo si = new SystemInfo();
         HardwareAbstractionLayer hal = si.getHardware();
+        OperatingSystem os=si.getOperatingSystem();
         setCpuInfo(hal.getProcessor());
         setMemInfo(hal.getMemory());
-        setSystemInfo(hal.getComputerSystem());
         setJvmInfo();
+        setDiskInfo(os);
         setCpuInfo(hal.getProcessor());
         setNetworkInterfaces(hal.getNetworkIFs());
         System.out.println("完成");
@@ -71,7 +78,6 @@ public class SystemHardwareInfo implements Serializable {
         ia=ia.getLocalHost();
         String localname=ia.getHostName();
         String localip=ia.getHostAddress();
-
         long[] prevTicks = processor.getSystemCpuLoadTicks();
         Util.sleep(1000);
         long[] ticks = processor.getSystemCpuLoadTicks();
@@ -103,13 +109,15 @@ public class SystemHardwareInfo implements Serializable {
     }
 
 
+
+
     private  void setNetworkInterfaces(NetworkIF[] networkIFs) throws Exception {
 
+
         List netRet = new ArrayList();
-        FileOutputStream outstr = new FileOutputStream("/tmp/NetInfo.txt");
-        ObjectOutputStream outObj = new ObjectOutputStream(outstr);
         for (NetworkIF net : networkIFs) {
             HashMap hm = new HashMap();
+            hm.put("time",df.format(new Date()));
             hm.put("netCardName", net.getDisplayName());
             hm.put("macAddr", net.getMacaddr());
             hm.put("ip", Arrays.toString(net.getIPv4addr()));
@@ -123,40 +131,60 @@ public class SystemHardwareInfo implements Serializable {
             netRet.add(hm);
 
         }
+
         rabbitTemplate.convertAndSend(RabbitMQConfig.ITEM_TOPIC_EXCHANGE_NET,"net_metrics",netRet);
-    }
-    private  void setSystemInfo(ComputerSystem computerSystem) throws Exception{
-
-        FileOutputStream outstr = new FileOutputStream("/tmp/SysInfo.txt");
-        ObjectOutputStream outObj = new ObjectOutputStream(outstr);
-        String Manufacturer=computerSystem.getManufacturer();
-        String Model=computerSystem.getModel();
-        String SerialNumber=computerSystem.getSerialNumber();
-        final Firmware firmware = computerSystem.getFirmware();
-        String firmwareManufacturer=firmware.getManufacturer();
-        String firmwareName=firmware.getName();
-        String firmwareVersion=firmware.getVersion();
-        final Baseboard baseboard = computerSystem.getBaseboard();
-        String baseboardManufacturer=baseboard.getManufacturer();
-        String baseboardModel=baseboard.getModel();
-        String baseboardVersion=baseboard.getVersion();
-        String baseboardSerialNumber=baseboard.getSerialNumber();
 
 
     }
+    /*
+       获取磁盘数据
+     */
+    private   void setDiskInfo(OperatingSystem os) throws Exception {
+
+        List diskRet = new ArrayList();
+        FileSystem fileSystem = os.getFileSystem();
+        OSFileStore[] fsArray = fileSystem.getFileStores();
+        for (OSFileStore fs : fsArray) {
+
+            HashMap hm = new HashMap();
+            long free = fs.getUsableSpace();
+            long total = fs.getTotalSpace();
+            long used = total - free;
+            hm.put("time",df.format(new Date()));
+            hm.put("ip",IpTool.getIp());
+            hm.put("mount",fs.getMount());
+            hm.put("type",fs.getType());
+            hm.put("name",fs.getName());
+            hm.put("total",convertFileSize(total));
+            hm.put("free",convertFileSize(free));
+            hm.put("used",convertFileSize(used));
+            hm.put("usge",div(used, total, 2));
+            diskRet.add(hm);
+
+        }
+
+
+        rabbitTemplate.convertAndSend(RabbitMQConfig.ITEM_TOPIC_EXCHANGE_DISK,"disk_metrics",diskRet);
+
+    }
+
 
     /**
      * 设置内存信息
      */
     private void setMemInfo(GlobalMemory memory) throws Exception{
 
-            HashMap hm = new HashMap();
-            FileOutputStream outstr = new FileOutputStream("/tmp/obj.txt");
-            ObjectOutputStream outObj = new ObjectOutputStream(outstr);
-            hm.put("total",memory.getTotal());
-            hm.put("used",(memory.getTotal() - memory.getAvailable()));
-            hm.put("free",memory.getAvailable());
-            rabbitTemplate.convertAndSend(RabbitMQConfig.ITEM_TOPIC_EXCHANGE_MEM ,"mem_metrics" ,hm);
+        InetAddress ia=null;
+        ia=ia.getLocalHost();
+        String localname=ia.getHostName();
+        String localip=ia.getHostAddress();
+        HashMap hm = new HashMap();
+        hm.put("ip",localip);
+        hm.put("time",df.format(new Date()));
+        hm.put("total",memory.getTotal());
+        hm.put("used",(memory.getTotal() - memory.getAvailable()));
+        hm.put("free",memory.getAvailable());
+        rabbitTemplate.convertAndSend(RabbitMQConfig.ITEM_TOPIC_EXCHANGE_MEM ,"mem_metrics" ,hm);
 
     }
 
@@ -196,6 +224,22 @@ public class SystemHardwareInfo implements Serializable {
         } else {
             return String.format("%d B" , size);
         }
+    }
+
+    public static double div(double v1, double v2, int scale)
+    {
+        if (scale < 0)
+        {
+            throw new IllegalArgumentException(
+                    "The scale must be a positive integer or zero");
+        }
+        BigDecimal b1 = new BigDecimal(Double.toString(v1));
+        BigDecimal b2 = new BigDecimal(Double.toString(v2));
+        if (b1.compareTo(BigDecimal.ZERO) == 0)
+        {
+            return BigDecimal.ZERO.doubleValue();
+        }
+        return b1.divide(b2, scale, RoundingMode.HALF_UP).doubleValue();
     }
 }
 

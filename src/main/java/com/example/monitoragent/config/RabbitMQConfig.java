@@ -32,6 +32,10 @@ public class RabbitMQConfig {
     public Exchange topicExchangeNet(){
         return ExchangeBuilder.topicExchange(ITEM_TOPIC_EXCHANGE_NET).durable(true).build();
     }
+    @Bean("itemTopicExchangeDisk")
+    public Exchange topicExchangeDisk(){
+        return ExchangeBuilder.topicExchange(ITEM_TOPIC_EXCHANGE_DISK).durable(true).build();
+    }
 
 
 
@@ -71,6 +75,12 @@ public class RabbitMQConfig {
     public Binding itemQueueExchangeNet(@Qualifier("itemQueueNet") Queue queue,
                                         @Qualifier("itemTopicExchangeNet") Exchange exchange){
         return BindingBuilder.bind(queue).to(exchange).with("net_metrics").noargs();
+    }
+
+    @Bean
+    public Binding itemQueueExchangeDisk(@Qualifier("itemQueueDisk") Queue queue,
+                                        @Qualifier("itemTopicExchangeDisk") Exchange exchange){
+        return BindingBuilder.bind(queue).to(exchange).with("disk_metrics").noargs();
     }
 
 }

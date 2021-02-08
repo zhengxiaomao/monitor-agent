@@ -4,8 +4,8 @@ server:
 #Rabbitmq的配置
 spring:
   rabbitmq:
-    host: 172.16.58.143
+    host: 172.16.58.156
     port: 5672
     virtual-host: /
-    username: admin
-    password: admin
+    username: guest
+    password: guest
